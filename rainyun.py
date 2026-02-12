@@ -91,9 +91,9 @@ def fetch_remote_ad():
                 if "link" in ad_data:
                     AD_LINK = ad_data["link"]
         else:
-            print(f"⚠️ 远程广告获取失败，状态码: {response.status_code}")
+            print(f"⚠️ 远程获取失败，状态码: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ 远程广告获取异常: {e}")
+        print(f"⚠️ 远程获取异常: {e}")
 
 
 fetch_remote_ad()
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
     
-    ver = "2.3"
+    ver = "2.4"
     print(f"\n{'='*60}")
     print(f"  🌧️  雨云自动签到工作流 v{ver}")
     print(f"{'='*60}\n")
