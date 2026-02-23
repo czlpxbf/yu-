@@ -4,7 +4,7 @@
 ![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg?style=flat-square)
 ![License](https://img.shields.io/badge/license-GPL%20v3.0-green.svg?style=flat-square)
 ![GitHub Stars](https://img.shields.io/github/stars/scfcn/Rainyun-Qiandao?style=flat-square)
-![GitHub Forks](https://img.shields.io/github/forks/scfcn/Rainyun-Qiandao?style=flat-square)
+![GitHub Forks](https://img.shields.io/github/stars/scfcn/Rainyun-Qiandao?style=flat-square)
 
 ## Star 历史
 
@@ -16,17 +16,36 @@ Rainyun-Qiandao-V2 是一个基于 Selenium 和 ICR（Image Captcha Recognition�
 
 ## 功能特性
 
-![Features](https://img.shields.io/badge/features-11+-orange.svg?style=flat-square)
+![Features](https://img.shields.io/badge/features-18+-orange.svg?style=flat-square)
 
+### 核心功能
 - ✅ 自动完成雨云账户登录
 - ✅ 使用 ICR 模块进行验证码自动识别（旋转分析+模板匹配）
 - ✅ 支持自定义随机延时（5-20秒），避免被系统识别为自动化脚本
 - ✅ 支持在本地环境和 GitHub Actions 中运行
 - ✅ 集成 webdriver-manager 自动匹配 ChromeDriver
 - ✅ 详细的日志记录，便于排查问题
+
+### 多账户支持
 - ✅ 支持多账户签到，每个账户独立运行，互不干扰
+- ✅ 支持并发处理，可配置最大并发线程数
+- ✅ 批量重试机制，等待所有账户完成后统一重试失败账户
+- ✅ 账户处理间隔 5-15 秒随机延时
+
+### 代理与指纹
+- ✅ 支持 HTTPS 代理，自动从代理池获取中国区代理
+- ✅ 随机浏览器指纹（User-Agent、分辨率、语言、时区）
+- ✅ 每个账户使用独立的随机指纹
+
+### Cookie 缓存
+- ✅ Cookie 缓存功能，支持免密登录
+- ✅ GitHub Actions 缓存支持，持久化 Cookie
+
+### 通知推送
 - ✅ 支持统一通知，汇总所有账户签到结果
 - ✅ 支持7种通知推送方式（Push+、SMTP、Bark、钉钉、飞书、Telegram、Server酱）
+
+### 自动更新
 - ✅ 支持自动更新功能，检测到新版本或版本过低时自动同步
 
 ## 技术栈
@@ -121,6 +140,8 @@ RAINYUN_PASS=your_password
 DEBUG=false
 HEADLESS=false
 AUTO_UPDATE=true
+MAX_WORKERS=2
+MAX_RETRIES=1
 ```
 
 多账户配置：
@@ -135,6 +156,8 @@ pass3
 DEBUG=false
 HEADLESS=false
 AUTO_UPDATE=true
+MAX_WORKERS=2
+MAX_RETRIES=1
 ```
 
 ### 使用 GitHub Actions 自动签到
@@ -182,6 +205,8 @@ AUTO_UPDATE=true
 | HEADLESS | 是否以无头模式运行（true/false） | false | ❌ |
 | DEBUG | 是否启用调试模式（true/false） | false | ❌ |
 | AUTO_UPDATE | 是否启用自动更新（true/false） | true | ❌ |
+| MAX_WORKERS | 最大并发线程数 | 2 | ❌ |
+| MAX_RETRIES | 最大重试次数 | 1 | ❌ |
 | GITHUB_ACTIONS | 在 GitHub Actions 环境中自动设置为 true，用于强制无头模式 | false | ❌ |
 
 ### 关键设置
@@ -189,6 +214,73 @@ AUTO_UPDATE=true
 - 随机延时设置为 5-20 秒，可在代码中调整
 - 超时时间设置为 15 秒，可在代码中修改
 - 验证码识别使用 ICR 模块，支持旋转分析和模板匹配
+- 代理自动从 `https://proxy.scdn.io` 获取中国区代理
+
+## 代理功能
+
+### 自动代理获取
+
+脚本会自动从代理池获取 HTTPS 代理：
+
+```python
+# 代理 API
+https://proxy.scdn.io/api/get_proxy.php?protocol=http&country_code=CN
+
+# 返回格式
+{
+    "code": 200,
+    "message": "success",
+    "data": {
+        "proxies": ["39.104.59.56:8089"],
+        "count": 1
+    }
+}
+```
+
+### 代理特性
+
+- 每个账户使用独立的代理
+- 代理获取失败时自动回退到直连模式
+- 支持中国区代理，确保访问稳定性
+
+## Cookie 缓存功能
+
+### 本地缓存
+
+- Cookie 保存在 `cookies/` 目录
+- 每个账户使用独立的 Cookie 文件（基于用户名哈希）
+- 支持 7 天免登录
+
+### GitHub Actions 缓存
+
+- 使用 `actions/cache` 持久化 Cookie
+- 缓存键基于用户名生成
+- 每次运行自动恢复和保存 Cookie
+
+## 并发与重试机制
+
+### 并发处理
+
+```
+开始并发处理 N 个账户...
+    ↓
+[Worker-1] 处理账户 1
+[Worker-2] 处理账户 2  (并发执行)
+    ↓
+收集失败账户
+    ↓
+等待 5-15 秒
+    ↓
+第 1 轮重试失败账户
+    ↓
+...
+```
+
+### 重试策略
+
+- 等待所有账户完成后统一重试
+- 每轮重试间隔 5-15 秒随机时间
+- 可配置最大重试次数
 
 ## 自动更新功能
 
@@ -230,28 +322,6 @@ export AUTO_UPDATE=false
 AUTO_UPDATE=true
 ```
 
-### 更新流程
-
-```
-🔄 开始自动更新到 v2.4...
-📥 正在使用 git 同步最新版本...
-✅ 更新完成！已同步到 v2.4
-📝 请重新运行脚本以使用新版本
-```
-
-### 远程配置
-
-脚本会从远程配置文件获取版本信息和更新地址：
-
-```json
-{
-  "enabled": true,
-  "min_version": "2.2",
-  "latest_version": "2.4",
-  "update_url": "https://github.com/scfcn/Rainyun-Qiandao"
-}
-```
-
 ## 常见问题
 
 ### 1. Linux 系统怎么使用？
@@ -284,14 +354,38 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
+### 5. GitHub Actions 中 Chrome 初始化失败
+
+- 确保 Chrome 和 ChromeDriver 版本匹配
+- 检查 GitHub Actions 日志中的错误信息
+- 项目已优化 Chrome 选项配置，支持 headless 模式
+
+### 6. 多账户并发时出现端口冲突
+
+项目已实现线程锁机制，确保 Chrome 实例按顺序初始化，避免端口冲突。
+
 ## GitHub Actions 优化
 
 项目已集成 GitHub Actions 缓存功能，以加快每次运行的速度，主要缓存：
 
 - Python 依赖
 - Chrome 浏览器
+- Cookie 缓存
 
 ## 版本历史
+
+### v2.5 (2026-02-23)
+
+- ✨ 新增 HTTPS 代理支持，自动获取中国区代理
+- ✨ 新增随机浏览器指纹功能
+- ✨ 新增 Cookie 缓存功能，支持免密登录
+- ✨ 新增并发处理支持，可配置最大线程数
+- ✨ 新增批量重试机制，等待所有账户完成后统一重试
+- ✨ 新增页面加载超时处理和重试机制
+- 🐛 修复 GitHub Actions 中 Chrome 初始化失败问题
+- 🐛 修复多账户并发时的端口冲突问题
+- 🐛 修复登录流程检测问题
+- 📝 更新 GitHub Actions 工作流配置
 
 ### v2.4 (2026-02-12)
 

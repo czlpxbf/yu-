@@ -75,43 +75,6 @@ except ImportError:
     def send(*args, **kwargs):
         pass
 
-
-def init_selenium(debug=False, headless=False):
-    ops = webdriver.ChromeOptions()
-    if headless or os.environ.get("GITHUB_ACTIONS", "false") == "true":
-        for option in ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']:
-            ops.add_argument(option)
-    ops.add_argument('--window-size=1920,1080')
-    ops.add_argument('--disable-blink-features=AutomationControlled')
-    ops.add_argument('--no-proxy-server')
-    ops.add_argument('--lang=zh-CN')
-    
-    is_github_actions = os.environ.get("GITHUB_ACTIONS", "false") == "true"
-    if debug and not is_github_actions:
-        ops.add_experimental_option("detach", True)
-    
-    try:
-        if ChromeDriverManager:
-            if ChromeType and hasattr(ChromeType, 'GOOGLE'):
-                manager = ChromeDriverManager(chrome_type=ChromeType.GOOGLE)
-            else:
-                manager = ChromeDriverManager()
-            driver_path = manager.install()
-            service = Service(driver_path)
-            driver = webdriver.Chrome(service=service, options=ops)
-            return driver
-    except Exception as e:
-        print(f"webdriver-manager失败: {e}")
-
-    # 备用方案
-    try:
-        driver = webdriver.Chrome(options=ops)
-        return driver
-    except Exception:
-        pass
-        
-    raise Exception("无法初始化Selenium WebDriver")
-
 def generate_random_fingerprint():
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -152,121 +115,124 @@ def generate_random_fingerprint():
         "timezone": random.choice(timezones)
     }
 
-def init_selenium(debug=False, headless=False, fingerprint=None):
+_selenium_init_lock = threading.Lock()
+
+def get_proxy():
+    try:
+        session = get_http_session()
+        response = session.get(
+            "https://proxy.scdn.io/api/get_proxy.php?protocol=http&country_code=CN",
+            timeout=10,
+            proxies={"http": None, "https": None}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 200 and data.get("data", {}).get("proxies"):
+                proxy = data["data"]["proxies"][0]
+                logger.info(f"获取到代理: {proxy}")
+                return proxy
+    except Exception as e:
+        logger.warning(f"获取代理失败: {e}")
+    return None
+
+def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
     if fingerprint is None:
         fingerprint = generate_random_fingerprint()
     
     ops = webdriver.ChromeOptions()
-    if headless or os.environ.get("GITHUB_ACTIONS", "false") == "true":
-        for option in ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']:
-            ops.add_argument(option)
     
-    ops.add_argument(f'--window-size={fingerprint["resolution"]}')
+    is_github_actions = os.environ.get("GITHUB_ACTIONS", "false") == "true"
+    
+    if headless or is_github_actions:
+        ops.add_argument('--headless=new')
+        ops.add_argument('--no-sandbox')
+        ops.add_argument('--disable-dev-shm-usage')
+        ops.add_argument('--disable-gpu')
+        ops.add_argument('--disable-software-rasterizer')
+    
     ops.add_argument('--disable-blink-features=AutomationControlled')
-    ops.add_argument('--no-proxy-server')
+    
+    if proxy:
+        ops.add_argument(f'--proxy-server=http://{proxy}')
+        logger.info(f"使用代理: {proxy}")
+    else:
+        ops.add_argument('--no-proxy-server')
+    
     ops.add_argument(f'--lang={fingerprint["language"]}')
     ops.add_argument(f'--user-agent={fingerprint["user_agent"]}')
     ops.add_argument('--disable-infobars')
     ops.add_argument('--disable-extensions')
     ops.add_argument('--disable-notifications')
     ops.add_argument('--disable-popup-blocking')
-    ops.add_argument('--disable-save-password-bubble')
     ops.add_argument('--disable-translate')
-    ops.add_argument('--disable-default-apps')
     ops.add_argument('--disable-sync')
-    ops.add_argument('--metrics-recording-only')
     ops.add_argument('--no-first-run')
-    ops.add_argument('--safebrowsing-disable-auto-update')
     ops.add_argument('--disable-background-networking')
-    ops.add_argument('--disable-background-timer-throttling')
-    ops.add_argument('--disable-backgrounding-occluded-windows')
-    ops.add_argument('--disable-renderer-backgrounding')
     ops.add_argument('--disable-component-update')
     ops.add_argument('--disable-domain-reliability')
-    ops.add_argument('--disable-features=IsolateOrigins,site-per-process')
-    ops.add_argument('--disable-web-security')
     ops.add_argument('--ignore-certificate-errors')
-    ops.add_argument('--ignore-ssl-errors')
-    ops.add_argument('--dns-prefetch-disable')
-    ops.add_argument('--disable-hang-monitor')
-    ops.add_argument('--disable-ipc-flooding-protection')
-    ops.add_argument('--disable-popup-blocking')
-    ops.add_argument('--disable-prompt-on-repost')
-    ops.add_argument('--disable-client-side-phishing-detection')
-    ops.add_argument('--disable-autofill')
-    ops.add_argument('--disable-breakpad')
-    ops.add_argument('--disable-component-extensions-with-background-pages')
-    ops.add_argument('--disable-extensions')
-    ops.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
-    ops.add_argument('--disable-print-preview')
-    ops.add_argument('--disable-setuid-sandbox')
-    ops.add_argument('--disable-software-rasterizer')
-    ops.add_argument('--disable-web-security')
-    ops.add_argument('--enable-automation')
-    ops.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
-    ops.add_argument('--force-color-profile=srgb')
-    ops.add_argument('--hide-scrollbars')
-    ops.add_argument('--in-process-gpu')
     ops.add_argument('--log-level=3')
     ops.add_argument('--mute-audio')
-    ops.add_argument('--remote-debugging-port=9222')
-    ops.add_argument('--start-maximized')
-    ops.add_argument('--blink-settings=imagesEnabled=true')
+    ops.add_argument('--window-size=1920,1080')
+    
+    if is_github_actions:
+        ops.add_argument('--disable-features=VizDisplayCompositor')
+        ops.add_argument('--disable-features=IsolateOrigins,site-per-process')
     
     prefs = {
         "credentials_enable_service": False,
         "profile.password_manager_enabled": False,
-        "profile.default_content_setting_values.notifications": 2,
-        "profile.default_content_setting_values.images": 1,
-        "profile.managed_default_content_settings.images": 1,
-        "webkit.webprefs.loads_images_automatically": True,
-        "network.network_prediction_options": 1,
-        "profile.default_content_setting_values.stylesheets": 1,
-        "profile.default_content_setting_values.javascript": 1
+        "profile.default_content_setting_values.notifications": 2
     }
     ops.add_experimental_option("prefs", prefs)
     ops.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     ops.add_experimental_option('useAutomationExtension', False)
     
-    is_github_actions = os.environ.get("GITHUB_ACTIONS", "false") == "true"
     if debug and not is_github_actions:
         ops.add_experimental_option("detach", True)
     
     driver = None
     
-    if is_github_actions:
-        try:
-            print("GitHub Actions环境：使用系统ChromeDriver")
-            driver = webdriver.Chrome(options=ops)
-        except Exception as e:
-            print(f"系统ChromeDriver失败: {e}")
-            raise Exception(f"GitHub Actions环境初始化Selenium失败: {e}")
-    elif ChromeDriverManager:
-        try:
-            print("尝试使用webdriver-manager...")
-            if ChromeType and hasattr(ChromeType, 'GOOGLE'):
-                manager = ChromeDriverManager(chrome_type=ChromeType.GOOGLE)
-            else:
-                manager = ChromeDriverManager()
-            driver_path = manager.install()
-            if os.path.isfile(driver_path) and not driver_path.endswith('.chromedriver'):
-                import stat
-                if not os.access(driver_path, os.X_OK):
-                    os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                service = Service(driver_path)
-                driver = webdriver.Chrome(service=service, options=ops)
-            else:
-                print(f"webdriver-manager返回无效路径: {driver_path}")
-        except Exception as e:
-            print(f"webdriver-manager失败: {e}")
+    with _selenium_init_lock:
+        time.sleep(0.5)
+        
+        if is_github_actions:
+            debug_port = random.randint(9222, 9322)
+            ops.add_argument(f'--remote-debugging-port={debug_port}')
+            ops.add_argument('--disable-features=VizDisplayCompositor')
+            
+            try:
+                print(f"GitHub Actions环境：使用系统ChromeDriver (端口: {debug_port})")
+                driver = webdriver.Chrome(options=ops)
+            except Exception as e:
+                print(f"系统ChromeDriver失败: {e}")
+                raise Exception(f"GitHub Actions环境初始化Selenium失败: {e}")
+        elif ChromeDriverManager:
+            try:
+                print("尝试使用webdriver-manager...")
+                if ChromeType and hasattr(ChromeType, 'GOOGLE'):
+                    manager = ChromeDriverManager(chrome_type=ChromeType.GOOGLE)
+                else:
+                    manager = ChromeDriverManager()
+                driver_path = manager.install()
+                if os.path.isfile(driver_path) and not driver_path.endswith('.chromedriver'):
+                    import stat
+                    if not os.access(driver_path, os.X_OK):
+                        os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                    service = Service(driver_path)
+                    driver = webdriver.Chrome(service=service, options=ops)
+                else:
+                    print(f"webdriver-manager返回无效路径: {driver_path}")
+            except Exception as e:
+                print(f"webdriver-manager失败: {e}")
 
-    if driver is None:
-        try:
-            print("尝试使用系统ChromeDriver...")
-            driver = webdriver.Chrome(options=ops)
-        except Exception as e:
-            print(f"系统ChromeDriver失败: {e}")
-            raise Exception("无法初始化Selenium WebDriver")
+        if driver is None:
+            try:
+                print("尝试使用系统ChromeDriver...")
+                driver = webdriver.Chrome(options=ops)
+            except Exception as e:
+                print(f"系统ChromeDriver失败: {e}")
+                raise Exception("无法初始化Selenium WebDriver")
     
     driver.set_page_load_timeout(30)
     driver.set_script_timeout(30)
@@ -556,8 +522,11 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         
         fingerprint = generate_random_fingerprint()
         logger.info(f"使用浏览器指纹: {fingerprint['user_agent'][:50]}...")
+        
+        proxy = get_proxy()
+        
         logger.info("初始化 Selenium")
-        driver = init_selenium(debug=debug, headless=headless, fingerprint=fingerprint)
+        driver = init_selenium(debug=debug, headless=headless, fingerprint=fingerprint, proxy=proxy)
         
         globals()['driver'] = driver 
         
