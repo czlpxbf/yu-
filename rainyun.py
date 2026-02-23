@@ -21,6 +21,13 @@ import ICR
 _http_session = None
 _http_session_lock = threading.Lock()
 
+def mask_username(user):
+    if not user:
+        return ""
+    if len(user) <= 4:
+        return user[0] + "*" * (len(user) - 1)
+    return user[:2] + "*" * (len(user) - 4) + user[-2:]
+
 def get_http_session():
     global _http_session
     if _http_session is None:
@@ -117,25 +124,7 @@ def generate_random_fingerprint():
 
 _selenium_init_lock = threading.Lock()
 
-def get_proxy():
-    try:
-        session = get_http_session()
-        response = session.get(
-            "https://proxy.scdn.io/api/get_proxy.php?protocol=http&country_code=CN",
-            timeout=10,
-            proxies={"http": None, "https": None}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("code") == 200 and data.get("data", {}).get("proxies"):
-                proxy = data["data"]["proxies"][0]
-                logger.info(f"获取到代理: {proxy}")
-                return proxy
-    except Exception as e:
-        logger.warning(f"获取代理失败: {e}")
-    return None
-
-def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
+def init_selenium(debug=False, headless=False, fingerprint=None):
     if fingerprint is None:
         fingerprint = generate_random_fingerprint()
     
@@ -151,12 +140,7 @@ def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
         ops.add_argument('--disable-software-rasterizer')
     
     ops.add_argument('--disable-blink-features=AutomationControlled')
-    
-    if proxy:
-        ops.add_argument(f'--proxy-server=http://{proxy}')
-        logger.info(f"使用代理: {proxy}")
-    else:
-        ops.add_argument('--no-proxy-server')
+    ops.add_argument('--no-proxy-server')
     
     ops.add_argument(f'--lang={fingerprint["language"]}')
     ops.add_argument(f'--user-agent={fingerprint["user_agent"]}')
@@ -193,6 +177,20 @@ def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
     
     driver = None
     
+    local_chromedriver_paths = [
+        os.path.expanduser("~/.local/bin/chromedriver.exe"),
+        os.path.expanduser("~/.local/bin/chromedriver"),
+        os.path.join(os.path.dirname(__file__), "chromedriver.exe"),
+        os.path.join(os.path.dirname(__file__), "chromedriver"),
+    ]
+    
+    local_driver_path = None
+    for path in local_chromedriver_paths:
+        if os.path.isfile(path):
+            local_driver_path = path
+            print(f"找到本地ChromeDriver: {local_driver_path}")
+            break
+    
     with _selenium_init_lock:
         time.sleep(0.5)
         
@@ -207,6 +205,13 @@ def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
             except Exception as e:
                 print(f"系统ChromeDriver失败: {e}")
                 raise Exception(f"GitHub Actions环境初始化Selenium失败: {e}")
+        elif local_driver_path:
+            try:
+                print(f"使用本地ChromeDriver: {local_driver_path}")
+                service = Service(local_driver_path)
+                driver = webdriver.Chrome(service=service, options=ops)
+            except Exception as e:
+                print(f"本地ChromeDriver失败: {e}")
         elif ChromeDriverManager:
             try:
                 print("尝试使用webdriver-manager...")
@@ -240,7 +245,7 @@ def init_selenium(debug=False, headless=False, fingerprint=None, proxy=None):
     
     return driver
 
-def safe_get(driver, url, max_retries=3, timeout=30):
+def safe_get(driver, url, max_retries=3, timeout=20):
     from selenium.common.exceptions import TimeoutException as SeleniumTimeoutException
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
@@ -249,7 +254,7 @@ def safe_get(driver, url, max_retries=3, timeout=30):
         try:
             driver.set_page_load_timeout(timeout)
             driver.get(url)
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 5).until(
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
             return True
@@ -260,11 +265,11 @@ def safe_get(driver, url, max_retries=3, timeout=30):
             except:
                 pass
             if attempt < max_retries - 1:
-                time.sleep(2)
+                time.sleep(1)
         except Exception as e:
             logger.warning(f"页面加载异常 (尝试 {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
-                time.sleep(2)
+                time.sleep(1)
             else:
                 raise e
     return False
@@ -504,14 +509,15 @@ def compute_similarity(img1_path, img2_path):
         return 0.0, 0
 
 
-def sign_in_account(user, pwd, debug=False, headless=False):
+def sign_in_account(user, pwd, debug=False, headless=False, index=0):
     timeout = 15
     driver = None
     
     global ocr, det, wait 
     
     try:
-        logger.info(f"开始处理账户: {user}")
+        account_label = f"账户{index + 1}"
+        logger.info(f"开始处理: {account_label}")
         
         if ICR is not None:
             logger.info("使用ICR模块进行验证码识别（旋转分析+模板匹配）")
@@ -521,12 +527,8 @@ def sign_in_account(user, pwd, debug=False, headless=False):
             det = ddddocr.DdddOcr(det=True, show_ad=False)
         
         fingerprint = generate_random_fingerprint()
-        logger.info(f"使用浏览器指纹: {fingerprint['user_agent'][:50]}...")
-        
-        proxy = get_proxy()
-        
         logger.info("初始化 Selenium")
-        driver = init_selenium(debug=debug, headless=headless, fingerprint=fingerprint, proxy=proxy)
+        driver = init_selenium(debug=debug, headless=headless, fingerprint=fingerprint)
         
         globals()['driver'] = driver 
         
@@ -540,14 +542,15 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         safe_get(driver, "https://app.rainyun.com")
         if load_cookies(driver, user):
             driver.refresh()
-            time.sleep(3)
+            time.sleep(1)
             if check_cookie_valid(driver):
                 logger.info("Cookie登录成功！")
                 logger.info("正在转到赚取积分页")
+                wait = WebDriverWait(driver, timeout)
                 try:
                     safe_get(driver, "https://app.rainyun.com/account/reward/earn")
                     wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                    time.sleep(3)
+                    time.sleep(1)
                     
                     try:
                         completed = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::span[contains(text(),'已完成')][1]")
@@ -596,7 +599,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
                         logger.info("赚取积分操作完成")
                     else:
                         driver.refresh()
-                        time.sleep(3)
+                        time.sleep(1)
                 except Exception as e:
                     logger.error(f"Cookie登录后操作出错: {e}")
                     pass
@@ -607,18 +610,93 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         safe_get(driver, "https://app.rainyun.com/auth/login")
         wait = WebDriverWait(driver, timeout)
         
-        # 登录流程
+        time.sleep(2)
+        
+        try:
+            page_source = driver.page_source
+            logger.info(f"页面源码长度: {len(page_source)}")
+            current_url = driver.current_url
+            logger.info(f"当前URL: {current_url}")
+            
+            if "login" not in current_url.lower():
+                logger.warning(f"URL异常，期望包含login，实际: {current_url}")
+        except Exception as e:
+            logger.warning(f"获取页面信息失败: {e}")
+        
         logger.info("等待登录表单加载...")
-        username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
-        password = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
+        
+        username = None
+        password = None
+        
+        username_selectors = [
+            (By.NAME, 'login-field'),
+            (By.CSS_SELECTOR, 'input[name="login-field"]'),
+            (By.CSS_SELECTOR, 'input[type="text"]'),
+            (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
+            (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
+            (By.XPATH, '//input[@name="login-field"]'),
+        ]
+        
+        password_selectors = [
+            (By.NAME, 'login-password'),
+            (By.CSS_SELECTOR, 'input[name="login-password"]'),
+            (By.CSS_SELECTOR, 'input[type="password"]'),
+            (By.XPATH, '//input[@name="login-password"]'),
+        ]
+        
+        for by, selector in username_selectors:
+            try:
+                username = wait.until(EC.visibility_of_element_located((by, selector)))
+                logger.info(f"找到用户名输入框: {selector}")
+                break
+            except TimeoutException:
+                continue
+            except Exception as e:
+                logger.debug(f"选择器 {selector} 失败: {e}")
+                continue
+        
+        if username is None:
+            logger.error("无法找到用户名输入框")
+            try:
+                inputs = driver.find_elements(By.TAG_NAME, 'input')
+                logger.info(f"页面共有 {len(inputs)} 个input元素")
+                for i, inp in enumerate(inputs):
+                    try:
+                        inp_type = inp.get_attribute('type') or 'text'
+                        inp_name = inp.get_attribute('name') or ''
+                        inp_placeholder = inp.get_attribute('placeholder') or ''
+                        logger.info(f"  input[{i}]: type={inp_type}, name={inp_name}, placeholder={inp_placeholder}")
+                    except:
+                        pass
+            except Exception as e:
+                logger.error(f"获取input元素失败: {e}")
+            raise TimeoutException("无法找到用户名输入框")
+        
+        for by, selector in password_selectors:
+            try:
+                password = wait.until(EC.visibility_of_element_located((by, selector)))
+                logger.info(f"找到密码输入框: {selector}")
+                break
+            except TimeoutException:
+                continue
+            except Exception as e:
+                logger.debug(f"选择器 {selector} 失败: {e}")
+                continue
+        
+        if password is None:
+            raise TimeoutException("无法找到密码输入框")
+        
         try:
             login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app"]/div[1]/div[1]/div/div[2]/fade/div/div/span/form/button')))
         except:
-            login_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]')))
+            try:
+                login_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]')))
+            except:
+                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "登录") or contains(text(), "登 录")]')))
             
         username.clear()
         password.clear()
-        logger.info(f"输入用户名: {user[:3]}***")
+        logger.info("输入用户名...")
         username.send_keys(user)
         time.sleep(0.5)
         logger.info("输入密码...")
@@ -645,11 +723,11 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         
         logger.info("等待登录结果...")
         login_success = False
-        for i in range(15):
-            time.sleep(1)
+        for i in range(20):
+            time.sleep(0.5)
             try:
                 current_url = driver.current_url
-                logger.info(f"[{i+1}/15] 当前URL: {current_url}")
+                logger.info(f"[{i+1}/20] 当前URL: {current_url}")
                 if "dashboard" in current_url or "reward" in current_url:
                     login_success = True
                     logger.info("检测到登录成功（URL包含dashboard/reward）")
@@ -678,12 +756,10 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         save_cookies(driver, user)
         logger.info("正在转到赚取积分页")
         
-        time.sleep(2)
-        
         try:
             safe_get(driver, "https://app.rainyun.com/account/reward/earn")
             wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            time.sleep(3)
+            time.sleep(1)
             logger.info("赚取积分页面加载完成")
         except Exception as e:
             logger.error(f"跳转赚取积分页失败: {e}")
@@ -716,7 +792,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         for by, selector in strategies:
             try:
                 earn = wait.until(EC.element_to_be_clickable((by, selector)))
-                logger.info(f"找到赚取积分按钮: {selector}")
+                logger.info("找到赚取积分按钮")
                 break
             except: 
                 continue
@@ -748,7 +824,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         else:
             logger.warning("未找到赚取积分按钮，尝试刷新页面")
             driver.refresh()
-            time.sleep(3)
+            time.sleep(1)
         
         driver.implicitly_wait(5)
         try:
@@ -785,7 +861,7 @@ if __name__ == "__main__":
     det = None
     wait = None
 
-    ver = "2.3 (ICR + Cookie + Concurrency)"
+    ver = "2.5 (ICR + Cookie + Concurrency)"
     logger.info("------------------------------------------------------------------")
     logger.info(f"雨云自动签到工作流 v{ver}")
     logger.info(f"最大并发线程数: {max_workers}")
@@ -810,9 +886,10 @@ if __name__ == "__main__":
     def process_account(account_info):
         index, user, pwd = account_info
         thread_name = threading.current_thread().name
-        logger.info(f"[{thread_name}] === 开始处理第 {index} 个账户: {user} ===")
-        result = sign_in_account(user, pwd, debug=debug, headless=headless)
-        logger.info(f"[{thread_name}] === 第 {index} 个账户处理完成 ===")
+        account_label = f"账户{index + 1}"
+        logger.info(f"[{thread_name}] === 开始处理 {account_label} ===")
+        result = sign_in_account(user, pwd, debug=debug, headless=headless, index=index)
+        logger.info(f"[{thread_name}] === {account_label} 处理完成 ===")
         return (index, result)
     
     current_retry = 0
@@ -865,13 +942,14 @@ if __name__ == "__main__":
     notification_content = f"雨云自动签到结果汇总：\n\n总账户数: {total_count}\n成功账户数: {success_count}\n失败账户数: {total_count - success_count}\n\n详细结果：\n"
     
     for i, (success, user, points, error_msg) in enumerate(results, 1):
+        masked_user = mask_username(user)
         if success:
-            notification_content += f"{i}. ✅ {user}\n   积分: {points} | 约 {points / 2000:.2f} 元\n"
+            notification_content += f"✅ 账户{i} ({masked_user}): 积分 {points} | 约 {points / 2000:.2f} 元\n"
         else:
-            notification_content += f"{i}. ❌ {user}\n   错误: {error_msg}\n"
+            notification_content += f"❌ 账户{i} ({masked_user}): {error_msg}\n"
     
     try:
         send(notification_title, notification_content)
         logger.info("统一通知发送成功")
     except Exception as e:
-        logger.error(f"发送通知失败: {e}")
+        logger.warning("通知发送失败（未配置通知或配置错误）")
