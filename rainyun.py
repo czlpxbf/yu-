@@ -516,7 +516,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
     global ocr, det, wait 
     
     try:
-        account_label = f"账户{index + 1}"
+        account_label = "***"
         logger.info(f"开始处理: {account_label}")
         
         if ICR is not None:
@@ -537,7 +537,6 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
             driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": js})
         except: pass
         
-        # 尝试使用Cookie免密登录
         logger.info("尝试使用Cookie缓存登录")
         safe_get(driver, "https://app.rainyun.com")
         if load_cookies(driver, user):
@@ -605,44 +604,44 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
                     pass
             else:
                 logger.info("Cookie已失效，尝试重新登录")
-        
-        logger.info("发起登录请求")
-        safe_get(driver, "https://app.rainyun.com/auth/login")
-        wait = WebDriverWait(driver, timeout)
-        
-        time.sleep(2)
-        
-        try:
-            page_source = driver.page_source
-            logger.info(f"页面源码长度: {len(page_source)}")
-            current_url = driver.current_url
-            logger.info(f"当前URL: {current_url}")
             
-            if "login" not in current_url.lower():
-                logger.warning(f"URL异常，期望包含login，实际: {current_url}")
-        except Exception as e:
-            logger.warning(f"获取页面信息失败: {e}")
+            logger.info("发起登录请求")
+            safe_get(driver, "https://app.rainyun.com/auth/login")
+            wait = WebDriverWait(driver, timeout)
+            
+            time.sleep(2)
         
-        logger.info("等待登录表单加载...")
-        
-        username = None
-        password = None
-        
-        username_selectors = [
-            (By.NAME, 'login-field'),
-            (By.CSS_SELECTOR, 'input[name="login-field"]'),
-            (By.CSS_SELECTOR, 'input[type="text"]'),
-            (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
-            (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
-            (By.XPATH, '//input[@name="login-field"]'),
-        ]
-        
-        password_selectors = [
-            (By.NAME, 'login-password'),
-            (By.CSS_SELECTOR, 'input[name="login-password"]'),
-            (By.CSS_SELECTOR, 'input[type="password"]'),
-            (By.XPATH, '//input[@name="login-password"]'),
-        ]
+            try:
+                page_source = driver.page_source
+                logger.info(f"页面源码长度: {len(page_source)}")
+                current_url = driver.current_url
+                logger.info(f"当前URL: {current_url}")
+                
+                if "login" not in current_url.lower():
+                    logger.warning(f"URL异常，期望包含login，实际: {current_url}")
+            except Exception as e:
+                logger.warning(f"获取页面信息失败: {e}")
+            
+            logger.info("等待登录表单加载...")
+            
+            username = None
+            password = None
+            
+            username_selectors = [
+                (By.NAME, 'login-field'),
+                (By.CSS_SELECTOR, 'input[name="login-field"]'),
+                (By.CSS_SELECTOR, 'input[type="text"]'),
+                (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
+                (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
+                (By.XPATH, '//input[@name="login-field"]'),
+            ]
+            
+            password_selectors = [
+                (By.NAME, 'login-password'),
+                (By.CSS_SELECTOR, 'input[name="login-password"]'),
+                (By.CSS_SELECTOR, 'input[type="password"]'),
+                (By.XPATH, '//input[@name="login-password"]'),
+            ]
         
         for by, selector in username_selectors:
             try:
@@ -862,7 +861,7 @@ if __name__ == "__main__":
     headless = os.environ.get('HEADLESS', 'false').lower() == 'true'
     if is_github_actions: headless = True
     
-    max_workers = int(os.environ.get('MAX_WORKERS', '2'))
+    max_workers = 1
     max_retries = int(os.environ.get('MAX_RETRIES', '1'))
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -872,10 +871,9 @@ if __name__ == "__main__":
     det = None
     wait = None
 
-    ver = "2.5 (ICR + Cookie + Concurrency)"
+    ver = "2.5 (ICR + Cookie)"
     logger.info("------------------------------------------------------------------")
     logger.info(f"雨云自动签到工作流 v{ver}")
-    logger.info(f"最大并发线程数: {max_workers}")
     logger.info(f"最大重试次数: {max_retries}")
     logger.info("------------------------------------------------------------------")
     
@@ -953,11 +951,10 @@ if __name__ == "__main__":
     notification_content = f"雨云自动签到结果汇总：\n\n总账户数: {total_count}\n成功账户数: {success_count}\n失败账户数: {total_count - success_count}\n\n详细结果：\n"
     
     for i, (success, user, points, error_msg) in enumerate(results, 1):
-        masked_user = mask_username(user)
         if success:
-            notification_content += f"✅ 账户{i} ({masked_user}): 积分 {points} | 约 {points / 2000:.2f} 元\n"
+            notification_content += f"✅ {user}: 积分 {points} | 约 {points / 2000:.2f} 元\n"
         else:
-            notification_content += f"❌ 账户{i} ({masked_user}): {error_msg}\n"
+            notification_content += f"❌ {user}: {error_msg}\n"
     
     try:
         send(notification_title, notification_content)
