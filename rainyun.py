@@ -245,6 +245,24 @@ def init_selenium(debug=False, headless=False, fingerprint=None):
     
     return driver
 
+def dismiss_modal_confirm(driver, timeout):
+    wait = WebDriverWait(driver, min(timeout, 5))
+    try:
+        confirm = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//footer[contains(@id,'modal') and contains(@id,'footer')]//button[contains(normalize-space(.), '确认')]")
+            )
+        )
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", confirm)
+        except Exception:
+            pass
+        time.sleep(0.2)
+        confirm.click()
+        logger.info("已关闭弹窗：确认")
+    except Exception:
+        pass
+
 def safe_get(driver, url, max_retries=3, timeout=20):
     from selenium.common.exceptions import TimeoutException as SeleniumTimeoutException
     from selenium.webdriver.support.ui import WebDriverWait
