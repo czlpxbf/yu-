@@ -703,7 +703,18 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
         password.send_keys(pwd)
         time.sleep(0.5)
         logger.info("点击登录按钮...")
-        driver.execute_script("arguments[0].click();", login_button)
+        
+        for click_retry in range(3):
+            try:
+                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "登录") or contains(text(), "登 录")]')))
+                driver.execute_script("arguments[0].click();", login_button)
+                break
+            except Exception as e:
+                if click_retry < 2:
+                    logger.warning(f"登录按钮点击失败，重试 ({click_retry + 1}/3)")
+                    time.sleep(1)
+                else:
+                    raise TimeoutException("登录按钮点击失败")
         
         # 登录验证码
         try:
